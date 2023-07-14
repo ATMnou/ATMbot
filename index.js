@@ -1795,6 +1795,4 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-client.login(
-  "MTEwNjIzOTAwNzM0MTQyMDYxNQ.GOO8x4.upxtkPfER-fspDLJNZ4fpOL1mc0b060E402BkM"
-);
+client.login(config.token);
