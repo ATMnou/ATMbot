@@ -1,0 +1,22 @@
+{
+  "passes": [
+    {
+      "id": 1,
+      "passname": "DracoAK",
+      "price": 0.5,
+      "limited": false,
+      "display": "드라코 AK",
+      "buyable": true,
+      "list": []
+    }
+  ],
+  "DevTools": [
+    {
+      "id": 1,
+      "passname": "Svelte",
+      "price": 3,
+      "display": "스벨트",
+      "list": []
+    }
+  ]
+}
