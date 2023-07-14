@@ -1,7 +1,6 @@
 <img src="./logo.png" width="300px" height="300px" title="Github_Logo"/>
 <br/>
-에틈봇
-=============
+# 에틈봇
 에틈봇은 세상에서 가장 무례한 디스코드 봇입니다.
 에틈봇은 다음과 같은 기능이 있습니다:
 <ul>
