@@ -1,5 +1,4 @@
 config.json
-chatdata/*
 gpt4all/*   
 # yarn v2
 .yarn/cache
