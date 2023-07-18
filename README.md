@@ -18,10 +18,12 @@
 
 0. 에틈봇을 사용하기 전, 다음과 같은 것이 필요합니다.
 <ul>
-<li>Node.js 18 이상의 버전(이 아래 버전 보장 X)</li>
-<li>Python(데이터 분석 시 필요)</li>
-<li>MySQL(인증 기능 사용시 필요)</li>
+<li><a href="https://nodejs.org/ko" target="_blank">Node.js</a> 18 이상의 버전</li>
+<li><a href="https://www.python.org/downloads/" target="_blank">파이썬</a>(데이터 분석 시 필요)</li>
+<li><a href="https://www.mysql.com/" target="_blank">MySQL</a> 또는 <a href="https://mariadb.org/" target="_blank">MariaDB</a>(인증 기능 사용시 필요)</li>
 <li>프로그래밍에 대한 기초적인 지식이 있는 대가리</li>
+<li><a href="https://yarnpkg.com/getting-started/install" target="_blank">Yarn</a></li>
+
 </ul>
 
 파이썬 사용 시, cmd에 다음과 같은 명령어를 입력해서 패키지를 설치해주세요.
@@ -31,14 +33,14 @@
 pip install nltk kiwipiepy textblob wordcloud pandas matplotlib seaborn pillow squarify gensim scikit-learn tqdm afinn py_lex scipy openpyxl --trusted-host pypi.org --trusted-host files.pythonhosted.org
 ```
 
-1. 이제, 디스코드 봇을 생성합니다. 봇을 생성하는 것을 굳이 여기서 알려줘야 하나요?
+1. 디스코드 봇을 <a href="https://discord.com/developers/applications">생성합니다.</a>
 
 2. 디스코드 봇을 생성했다면, 이 레포지토리를 클론하거나, 알아서 받아가세요.
 
 3. 노드 모듈이 포함되지 않았으니, 다음과 같은 명령어를 입력해주세요.
 
 ```bash
-npm i
+yarn
 ```
 
 4. config.json 파일을 루트 폴더에다 만들고, 내용물을 아래와 같이 해주세요.
@@ -49,9 +51,9 @@ npm i
 }
 ```
 
-5. MySQL의 데이터베이스를 추가해 주세요.
+5. MySQL / MariaDB의 데이터베이스를 추가해 주세요.
 
-6. 당신이 생성한 MySQL에 맞춰 에틈봇 소스 초반의 이 부분을 수정해주세요:
+6. 당신이 생성한 데이터베이스에 맞춰 에틈봇 소스 초반의 이 부분을 수정해주세요:
 
    ```js
    const connection = mysql.createConnection({
@@ -67,10 +69,17 @@ npm i
 8. 다음과 같은 명령어를 입력해주세요.
 
 ```bash
-node index.js
+yarn start
 ```
 
 9. 그 다음은 당신의 몫입니다.
+
+# FAQ
+
+- mysql2 라이브러리를 사용하여 MySQL과 MariaDB 둘 다 가능합니다.
+- 노드 20을 사용해도 에러는 아직 없지만, 이 봇은 노드 18을 사용하는 것을 권장합니다.
+- 특정 라이브러리가 노드 18 이상을 요구합니다. 노드 16은 사용하지 마세요.
+- 챗봇 기능은 <a href="https://gpt4all.io/index.html">GPT4All</a>로 교체될 수 있습니다. 무료이며, GPU를 사용하지 않습니다. 그러나 응답 속도가 느리며, ChatGPT보다는 자연스럽지 않으며, 응답을 할 수 없는 경우도 있습니다. 한국어는 알아들으나, 한국어로 대답할 수 없어 번역기를 사용합니다.
 
 # 후원
 

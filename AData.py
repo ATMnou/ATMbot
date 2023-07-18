@@ -5,7 +5,7 @@ from tqdm import tqdm
 import sys
 # args = sys.argv[1:]
 # when = args[0]
-when = "20230709"
+when = "20230718"
 kiwi = Kiwi()
 
 st = open('stopwords.txt', 'r', encoding='utf-8')

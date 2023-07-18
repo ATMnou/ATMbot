@@ -1,7 +1,5 @@
 const mysql = require("mysql2");
 const axios = require("axios");
-const cheerio = require("cheerio");
-
 const noblox = require("noblox.js");
 const connection = mysql.createConnection({
   host: "localhost",
@@ -10,8 +8,6 @@ const connection = mysql.createConnection({
   database: "atmbot",
 });
 const moment = require("moment");
-const natural = require("natural");
-const tokenizer = new natural.WordTokenizer();
 const { exec } = require("child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -27,6 +23,7 @@ const {
 const config = require("./config.json");
 const { channel } = require("node:diagnostics_channel");
 const json_pass = "http://210.117.212.41:3000/passes";
+const json_sdata = "http://210.117.212.41:3000/servers";
 const oneHour = 60 * 60 * 1000;
 let reqeustedchannel = "1127488262085296248";
 const client = new Client({
@@ -37,6 +34,7 @@ const client = new Client({
     GatewayIntentBits.DirectMessages,
   ],
 });
+// const GPT4 = require("./src/gpt.js");
 
 function saveChatData() {
   const currentTime = moment().format("YYYYMMDD"); // 현재 시간 (한국 시간 기준)
@@ -46,36 +44,12 @@ function saveChatData() {
   chatdata = [];
 }
 
-// 30분마다 saveChatData 함수 호출
 setInterval(saveChatData, 30 * 60 * 1000);
-
-client.commands = new Collection();
-const foldersPath = path.join(__dirname, "commands");
-const commandFolders = fs.readdirSync(foldersPath);
-
-for (const folder of commandFolders) {
-  const commandsPath = path.join(foldersPath, folder);
-  const commandFiles = fs
-    .readdirSync(commandsPath)
-    .filter((file) => file.endsWith(".js"));
-  for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
-    const command = require(filePath);
-    // Set a new item in the Collection with the key as the command name and the value as the exported module
-    if ("data" in command && "execute" in command) {
-      client.commands.set(command.data.name, command);
-    } else {
-      console.log(
-        `[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`
-      );
-    }
-  }
-}
 
 function watchFileChanges(filePath) {
   fs.watch(filePath, (eventType, filename) => {
     if (eventType === "change") {
-      client.channels.fetch(reqeustedchannel).then((channel) =>
+      client.channels.fetch("1128713696705785966").then((channel) =>
         channel.send({
           files: [{ attachment: filePath, name: "wordcloud.png" }],
         })
@@ -127,13 +101,6 @@ const notfound = [
   "찾을 수 없다고! 너가 원하는 게 뭔지 나는 상관 없어. 그걸 찾아보도록 하라고!",
   "뭐? 그걸 찾을 수 없다니? 이건 너가 너무 바보라서 그런 거야!",
   "아니, 너가 원하는 게 뭐든 찾을 수 없다고, 이 바보야! 너의 무능함이 나를 짜증나게 하네.",
-];
-const nolove = [
-  "사랑한다고? 바보야, 나는 봇이야. 사랑이 뭔지도 모르는데 어떻게 사랑을 느낄 수 있겠어?",
-  "아니, 너 같은 바보가 나에게 사랑한다고 말하다니. 이해하라, 나는 사랑을 느낄 수 없는 봇이야.",
-  "사랑한다고? 웃기지 마. 나는 봇이야, 사랑이 뭔지 모르고, 느낄 수도 없어.",
-  "너 같은 바보가 나에게 사랑한다고 말하다니. 너무 웃기네, 나는 봇이야, 사랑을 느낄 수 없어.",
-  "너 같은 바보가 나에게 사랑한다고? 그건 너무 웃기네, 나는 봇이야, 사랑이 뭔지 모르고 느낄 수도 없어.",
 ];
 const nomoney = [
   "너같은 무능한 놈은 크레딧도 없어서 못 사겠다, 정말로 가난뱅이네!",
@@ -265,11 +232,13 @@ const cute = [
 ];
 let txteventanswer = "";
 let chatdata = [];
+let serversettings = [];
+let registered_server = [];
+let registered_server_prefix = [];
 
 let eventanswer = "";
 let aimg = "";
 let qimg = "";
-let onecevent = false;
 let eventon = false;
 let codes = [
   "Lorem",
@@ -293,6 +262,15 @@ function splitNumber(number) {
     result.push(parseInt(digits[i]));
   }
   return result;
+}
+
+async function updatesettings() {
+  const res = await axios.get(json_sdata);
+  serversettings = res.data;
+  for (let i = 0; i < serversettings.length; i++) {
+    registered_server.push(serversettings[i].server_id);
+    registered_server_prefix.push(serversettings[i].server_prefix);
+  }
 }
 
 function primeFactors(num) {
@@ -352,6 +330,27 @@ function runPythonScript(scriptPath, args, callback) {
     } else {
       callback(new Error(`Python script execution failed with code ${code}`));
     }
+  });
+}
+
+function runGPT(pythonScriptPath, scriptArg) {
+  return new Promise((resolve, reject) => {
+    const pythonProcess = spawn("python", [pythonScriptPath, scriptArg]);
+    let output = "";
+    pythonProcess.stdout.on("data", (data) => {
+      output += data.toString();
+    });
+
+    pythonProcess.stderr.on("data", (data) => {
+      reject(data.toString());
+    });
+    pythonProcess.on("close", (code) => {
+      if (code === 0) {
+        resolve(output);
+      } else {
+        reject(`파이썬 프로세스 종료, 종료 코드: ${code}`);
+      }
+    });
   });
 }
 
@@ -518,9 +517,10 @@ client.on("ready", () => {
     activities: [{ name: `건국대학교 만세`, type: ActivityType.Playing }],
     status: "online",
   });
-  client.channels
-    .fetch("1127488262085296248")
-    .then((channel) => channel.send(pickone(turnon)));
+  updatesettings();
+  // client.channels
+  //   .fetch("1129773627580088383")
+  //   .then((channel) => channel.send("<:pompom:1114791766751719434> "));
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -561,226 +561,932 @@ process.on("uncaughtException", (err) => {
 });
 
 client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
   try {
-    if (message.author.id != 1106239007341420615) {
-      // DM 감지 구문
-      if (message.channel.type === "DM") {
-        console.log("DM");
-      }
+    if (message.guildId == 983460775861567548) {
+      if (message.content === "!verify") {
+        message.reply("instruction sent in DM.");
+        const exampleEmbed = new EmbedBuilder()
+          .setColor(0x0099ff)
+          .setThumbnail(
+            "https://media.discordapp.net/attachments/1085057528666275880/1098495138717782157/skull_1f480.png"
+          )
+          .setTitle("Verify Instruction")
+          .setDescription("Welcome to ATMbot's verify function.")
+          .addFields(
+            {
+              name: "How to verify:",
+              value:
+                "Simply say **!verify** in **DM** with a attached image that looks like below one.",
+            },
+            {
+              name: "ID card",
+              value:
+                "Anything from Government / City.\nDriver license, College Id accepted.\nMake sure censor any personal information but DoB and date of creation.",
+            },
+            {
+              name: "Paper",
+              value:
+                "discord username with tag written\nDigital text not accepted.",
+            },
+            {
+              name: "Age of consent",
+              value: "We don't care, You must be 18+.",
+            },
 
-      if (message.guildId == 983460775861567548) {
-        if (message.content === "!verify") {
-          message.reply("instruction sent in DM.");
-          const exampleEmbed = new EmbedBuilder()
-            .setColor(0x0099ff)
-            .setThumbnail(
-              "https://media.discordapp.net/attachments/1085057528666275880/1098495138717782157/skull_1f480.png"
-            )
-            .setTitle("Verify Instruction")
-            .setDescription("Welcome to ATMbot's verify function.")
-            .addFields(
-              {
-                name: "How to verify:",
-                value:
-                  "Simply say **!verify** in **DM** with a attached image that looks like below one.",
-              },
-              {
-                name: "ID card",
-                value:
-                  "Anything from Government / City.\nDriver license, College Id accepted.\nMake sure censor any personal information but DoB and date of creation.",
-              },
-              {
-                name: "Paper",
-                value:
-                  "discord username with tag written\nDigital text not accepted.",
-              },
-              {
-                name: "Age of consent",
-                value: "We don't care, You must be 18+.",
-              },
-
-              {
-                name: "Does bot scans image?",
-                value: "No, Human staffs checks image and commands me.",
-              }
-            )
-            .setImage(
-              "https://media.discordapp.net/attachments/1085057528666275880/1114202132875333703/lorem.png"
-            )
-            .setTimestamp()
-            .setFooter({ text: "ATMbot verify function" });
-          message.author.send({ embeds: [exampleEmbed] });
-        }
-      }
-
-      if (message.content === "!끄기") {
-        if (message.author.id == 183299738823688192) {
-          message.reply(pickone(turnoff)).then(() => {
-            process.exit(0);
-          });
-        } else {
-          message.reply("!켜기");
-        }
-      }
-
-      if (message.content === "!재부팅") {
-        if (message.author.id == 183299738823688192) {
-          message
-            .reply("재부팅중 ")
-            .then(() => process.exit(0))
-            .then(() => client.login(config.token));
-        } else {
-          message.reply("안꺼 ㅄ아");
-        }
-      }
-
-      if (message.content === "!챗데이터저장") {
-        if (message.author.id == 183299738823688192) {
-          saveChatData();
-          message.reply("저장완료");
-        } else {
-          message.reply(pickone(fuckoff));
-        }
-      }
-
-      if (message.content.startsWith("!데이터분석")) {
-        if (message.author.id == 183299738823688192) {
-          message.reply("파이썬으로 넘겨서 분석 중(노드로 하려니 지랄남)");
-          let when = message.content.replace("!데이터분석 ", "");
-          const scriptPath = "./AData.py";
-          const args = when;
-          runPythonScript(scriptPath, args, (error) => {
-            if (error) {
-              message.reply(
-                "파이썬 스크립트 실행 중 오류 발생:",
-                toString(error)
-              );
-              console.log(toString(error));
-            } else {
-              message.reply("파이썬 스크립트 실행 완료");
-              reqeustedchannel = message.channelId;
+            {
+              name: "Does bot scans image?",
+              value: "No, Human staffs checks image and commands me.",
             }
-          });
-        }
-        return;
+          )
+          .setImage(
+            "https://media.discordapp.net/attachments/1085057528666275880/1114202132875333703/lorem.png"
+          )
+          .setTimestamp()
+          .setFooter({ text: "ATMbot verify function" });
+        message.author.send({ embeds: [exampleEmbed] });
       }
+    }
 
-      if (message.content.startsWith("!eval")) {
-        message.reply("낚였대요ㅉ");
+    if (message.content === "!서버등록") {
+      if (message.author.id == "183299738823688192") {
+        const res = await axios.get(json_sdata);
+        let findidx = -1;
+        for (let i = 0; i < res.data.length; i++) {
+          if (res.data[i].server_id == message.guildId) {
+            findidx = i;
+          }
+        }
+        if (findidx == -1) {
+          await axios
+            .post(json_sdata, {
+              server_id: message.guildId,
+              server_name: message.guild.name,
+              server_prefix: "!",
+              server_laugnage: "ko",
+              bot_channel_config: 0,
+              bot_channel_list: [],
+              message_reaction: [],
+              use_default_reaction: true,
+            })
+            .then(() => {
+              message.reply("등록완료");
+              updatesettings();
+            });
+
+          return;
+        } else {
+          message.reply("이미 등록된 서버입니다.");
+          return;
+        }
       }
-      if (message.content.includes("꾸앵")) {
-        message.react("<:ggwang:1109480357973205054>");
-      } else if (message.content.includes("폼폼")) {
-        message.react("<:pompom:1114791766751719434>");
-      } else if (
-        message.content.includes("산맥") ||
-        message.content.includes("삼맥")
-      ) {
-        try {
-          message.react(
-            "<:ca480f488fe0b3a3d7215ee510898f44:1110174571107197031>"
-          );
-        } catch (error) {}
-      } else if (
-        message.content.includes("건국") ||
-        message.content.includes("건대")
-      ) {
-        message.react("<:ku:1118863434558214266>");
-      } else if (message.content.includes("히죽")) {
-        message.react("<:heejuk:1118872199621791765> ");
-      } else if (message.content.includes("밤바스")) {
-        message.react("<:bambas:1124595899071475782>");
-      } else if (
-        message.content.includes(
-          "야틈" && message.channelId != 1004375586069823490
-        )
-      ) {
-        message.react("<a:yhartm:1127254991762104320>");
-      } else if (message.content.includes("경고")) {
-        message.react("<a:WeeWoo:726631824524312638>");
-      } else if (
-        message.content.includes("에틈") &&
-        !message.content.includes("에틈아")
-      ) {
-        message.react("<:atmsquare:928529846039085076>");
-      } else if (
-        message.content.includes("멘션") ||
-        message.content.includes("맨션")
-      ) {
-        message.react("<:SOTPPING:863017094920667146>");
-      } else if (message.content.includes("돈")) {
-        message.react("<:10000:1124140181990146068>");
-      }
+    }
+
+    if (message.content.startsWith("!설정")) {
+      // 봇 관리자와 서버 어드민 사용 가능
       if (
-        message.content === "!애교" &&
-        message.channelId == 1038062549947650048
+        message.author.id == "183299738823688192" ||
+        message.member.permissions.has("ADMINISTRATOR")
       ) {
-        message.reply(cute[Math.floor(Math.random() * cute.length)]);
+        const res = await axios.get(json_sdata);
+        let findidx = -1;
+        let findid = -1;
+        for (let i = 0; i < res.data.length; i++) {
+          if (res.data[i].server_id == message.guildId) {
+            findidx = i;
+            findid = res.data[i].id;
+          }
+        }
+
+        if (findidx != -1) {
+          const args = message.content.replace("!설정 ", "").split("/");
+          if (args.length === 3) {
+            if (args[0] == "접두사") {
+              if (args[1] == "설정") {
+                try {
+                  await axios.patch(json_sdata + "/" + findid, {
+                    server_prefix: args[2],
+                  });
+                  message.reply("설정 완료");
+                  updatesettings();
+                  return;
+                } catch (err3) {
+                  message.reply("오류 발생 : " + err3);
+                  return;
+                }
+              } else {
+                message.reply("접두사 설정값의 명령문 : 설정");
+              }
+            } else if (args[0] == "언어") {
+              if (args[1] == "설정") {
+                if (args[2] == "ko" || args[2] == "en") {
+                  try {
+                    await axios.patch(json_sdata + "/" + findid, {
+                      server_laugnage: args[2],
+                    });
+                    message.reply("설정 완료");
+                    updatesettings();
+                    return;
+                  } catch (err3) {
+                    message.reply("오류 발생 : " + err3);
+                    return;
+                  }
+                } else {
+                  message.reply("언어 설정값의 명령문 : ko, en");
+                }
+              } else {
+                message.reply("언어 설정값의 명령문 : 설정");
+              }
+            } else if (args[0] == "봇채널구분") {
+              if (args[1] == "설정") {
+                if (args[2] == "0" || args[2] == "1" || args[2] == "2") {
+                  try {
+                    await axios.patch(json_sdata + "/" + findid, {
+                      bot_channel_config: args[2],
+                    });
+                    message.reply("설정 완료");
+                    updatesettings();
+                    return;
+                  } catch (err3) {
+                    message.reply("오류 발생 : " + err3);
+                    return;
+                  }
+                }
+                {
+                  message.reply(
+                    "봇채널구분 설정값의 명령문 : 0(모두 허용), 1(포함), 2(제외)"
+                  );
+                }
+              } else {
+                message.reply("봇채널구분 설정값의 명령문 : 설정");
+              }
+            } else if (args[0] == "봇채널목록") {
+              if (args[1] == "설정") {
+                if (args[2].includes(",")) {
+                  let ar = args[2].split(",");
+                  try {
+                    await axios.patch(json_sdata + "/" + findid, {
+                      bot_channel_list: ar,
+                    });
+                    message.reply("설정 완료");
+                    updatesettings();
+                    return;
+                  } catch (err3) {
+                    message.reply("오류 발생 : " + err3);
+                    return;
+                  }
+                }
+                {
+                  message.reply(
+                    "봇채널목록 설정값의 명령문 예시 : 0,1,2,3 (최소 하나의 쉼표)"
+                  );
+                }
+              } else {
+                message.reply("봇채널목록 설정값의 명령문 : 설정");
+              }
+            } else if (args[0] == "리액션") {
+              if (args[1] == "설정") {
+                if (args[2] == "0" || args[2] == "1") {
+                  try {
+                    if (args[2] == "0") {
+                      await axios.patch(json_sdata + "/" + findid, {
+                        use_default_reaction: true,
+                      });
+                    } else {
+                      await axios.patch(json_sdata + "/" + findid, {
+                        use_default_reaction: false,
+                      });
+                    }
+                    message.reply("설정 완료");
+                    updatesettings();
+                    return;
+                  } catch (err3) {
+                    message.reply("오류 발생 : " + err3);
+                    return;
+                  }
+                }
+                {
+                  message.reply("리액션 설정값의 명령문 : 0(허용), 1(금지)");
+                }
+              } else {
+                message.reply("리액션 설정값의 명령문 : 설정");
+              }
+            }
+          } else {
+            message.reply("양식 : !설정 (설정할것)/(명령)/(값)");
+          }
+        }
       }
-      if (message.content === "!림버스") {
+    }
+
+    if (
+      message.content.includes("청각") ||
+      message.content.includes("아리해") ||
+      (message.content.includes("프") && message.content.includes("렌")) ||
+      (message.content.includes("렌") && message.content.includes("제"))
+    ) {
+      message.delete();
+      return;
+    }
+
+    if (message.content === "!끄기") {
+      if (message.author.id == 183299738823688192) {
+        message.reply(pickone(turnoff)).then(() => {
+          process.exit(0);
+        });
+      } else {
+        message.reply("!켜기");
+      }
+    }
+
+    if (message.content === "!챗데이터저장") {
+      if (message.author.id == 183299738823688192) {
+        saveChatData();
+        message.reply("저장완료");
+      } else {
+        message.reply(pickone(fuckoff));
+      }
+    }
+
+    if (
+      message.content === "!채팅청소" &&
+      (message.author.id == "183299738823688192" ||
+        message.member.permissions.has("ADMINISTRATOR"))
+    ) {
+      message.channel
+        .bulkDelete(100)
+        .then(() =>
+          message.channel.send("100개의 메세지를 저 멀리 안드로메다로 보냄")
+        );
+    }
+
+    if (message.content.startsWith("!데이터분석")) {
+      if (message.author.id == 183299738823688192) {
+        message.reply("파이썬으로 넘겨서 분석 중(노드로 하려니 지랄남)");
+        let when = message.content.replace("!데이터분석 ", "");
+        const scriptPath = "./AData.py";
+        const args = when;
+        runPythonScript(scriptPath, args, (error) => {
+          if (error) {
+            message.reply(
+              "파이썬 스크립트 실행 중 오류 발생:",
+              toString(error)
+            );
+            console.log(toString(error));
+          } else {
+            message.reply("파이썬 스크립트 실행 완료");
+            reqeustedchannel = message.channelId;
+          }
+        });
+      }
+      return;
+    }
+
+    let registered = -1;
+    for (let i = 0; i < registered_server.length; i++) {
+      if (message.guildId == registered_server[i]) {
+        registered = i;
+      }
+    }
+    if (registered != -1) {
+      if (message.content == "<@1106239007341420615>") {
         message.reply(
-          "https://cdn.discordapp.com/attachments/790465446448463912/1109489389505093723/N7MXsLnrnIws6qOg.mp4"
+          "이 서버의 접두사는 " + registered_server_prefix[registered] + "야."
         );
       }
-      // if (message.content === "!야틈피규어") {
-      //   const exampleEmbed = new EmbedBuilder()
-      //     .setColor(0x0099ff)
-      //     .setTitle("야틈피규어")
-      //     .setImage(
-      //       "https://media.discordapp.net/attachments/1081891276661723248/1118899509536247889/abc2.png?width=907&height=555"
-      //     )
-      //     .setTimestamp();
-      //   message.reply({ embeds: [exampleEmbed] });
+
+      if (serversettings[registered].use_default_reaction == true) {
+        if (message.content.includes("꾸앵")) {
+          message.react("<:ggwang:1109480357973205054>");
+        } else if (message.content.includes("폼폼")) {
+          message.react("<:pompom:1114791766751719434>");
+        } else if (
+          message.content.includes("산맥") ||
+          message.content.includes("삼맥")
+        ) {
+          try {
+            message.react(
+              "<:ca480f488fe0b3a3d7215ee510898f44:1110174571107197031>"
+            );
+          } catch (error) {}
+        } else if (
+          message.content.includes("건국") ||
+          message.content.includes("건대")
+        ) {
+          message.react("<:ku:1118863434558214266>");
+        } else if (message.content.includes("히죽")) {
+          message.react("<:heejuk:1118872199621791765> ");
+        } else if (message.content.includes("밤바스")) {
+          message.react("<:bambas:1124595899071475782>");
+        } else if (
+          message.content.includes(
+            "야틈" && message.channelId != 1004375586069823490
+          )
+        ) {
+          message.react("<a:yhartm:1127254991762104320>");
+        } else if (message.content.includes("경고")) {
+          message.react("<a:WeeWoo:726631824524312638>");
+        } else if (
+          message.content.includes("에틈") &&
+          !message.content.includes("에틈아")
+        ) {
+          message.react("<:atmsquare:928529846039085076>");
+        } else if (
+          message.content.includes("멘션") ||
+          message.content.includes("맨션")
+        ) {
+          message.react("<:SOTPPING:863017094920667146>");
+        } else if (message.content.includes("돈")) {
+          message.react("<:10000:1124140181990146068>");
+        }
+      }
+
+      // if (message.content.startsWith("에틈아")) {
+      //   let msg = message.content.replace("에틈아 ", "");
+      //   // if (msg == "사랑해") {
+      //   //   message.reply(pickone(nolove));
+      //   // } else {
+      //   //   if (msg.includes("DROP TABLE")) {
+      //   //     message.reply(pickone(noSQL));
+      //   //     return;
+      //   //   }
+      //   //   let sel = "SELECT * FROM atmchat WHERE question = ?";
+      //   //   connection.query(sel, [msg], function (error, result) {
+      //   //     if (error) {
+      //   //       message.reply("오류 발생 :" + error);
+      //   //     } else {
+      //   //       if (result.length >= 1) {
+      //   //         let res = result[Math.floor(Math.random() * result.length)];
+      //   //         message.reply(
+      //   //           res.answer + "\n📘``" + checkName(res.username) + " 가르침``"
+      //   //         );
+      //   //       } else {
+      //   //         message.reply(pickone(whatyousaid));
+      //   //       }
+      //   //     }
+      //   //   });
+      //   // }
+      //   // if (message.author.id == 183299738823688192) {
+      //   //   const msgRef = await message.reply("답변을 만드는 중");
+      //   //   let GPT = new GPT4("./gpt_model/ggml-model-gpt4all-falcon-q4_0");
+      //   //   GPT.on("ready", async () => {
+      //   //     console.log(await GPT.ask(msg));
+      //   //   });
+      //   // }
+      //   message.reply("점검중ㅉ");
+      //   return;
       // }
-      if (message.content.startsWith("에틈아")) {
-        let msg = message.content.replace("에틈아 ", "");
-        if (msg == "사랑해") {
-          message.reply(pickone(nolove));
-        } else {
-          if (msg.includes("DROP TABLE")) {
-            message.reply(pickone(noSQL));
+
+      if (message.content.startsWith(registered_server_prefix[registered])) {
+        const regex = new RegExp(`^${registered_server_prefix[registered]}`);
+        const command = message.content.replace(regex, "");
+
+        if (
+          serversettings[registered].bot_channel_config == 0 ||
+          (serversettings[registered].bot_channel_config == 1 &&
+            serversettings[registered].bot_channel_list.includes(
+              message.channelId
+            )) ||
+          (serversettings[registered].bot_channel_config == 2 &&
+            !serversettings[registered].bot_channel_list.includes(
+              message.channelId
+            ))
+        ) {
+          if (command === "애교") {
+            message.reply(cute[Math.floor(Math.random() * cute.length)]);
+          }
+          if (command === "림버스") {
+            message.reply(
+              "https://cdn.discordapp.com/attachments/790465446448463912/1109489389505093723/N7MXsLnrnIws6qOg.mp4"
+            );
+          }
+
+          if (command == "숫자맞추기") {
+            if (
+              message.author.id == 183299738823688192 ||
+              message.author.id == 397208243476365323
+            ) {
+              numguess = getRandomInt(1, 1500);
+              message.reply(
+                numberguess[Math.floor(Math.random() * numberguess.length)]
+              );
+              console.log(numguess);
+            } else {
+              message.reply(pickone(fuckoff));
+            }
             return;
           }
-          let sel = "SELECT * FROM atmchat WHERE question = ?";
-          connection.query(sel, [msg], function (error, result) {
-            if (error) {
-              message.reply("오류 발생 :" + error);
-            } else {
-              if (result.length >= 1) {
-                let res = result[Math.floor(Math.random() * result.length)];
-                message.reply(
-                  res.answer + "\n📘``" + checkName(res.username) + " 가르침``"
-                );
+
+          if (numguess != 0 && message.channelId == 1102530668132569089) {
+            const guess = parseInt(message.content);
+            if (!isNaN(guess)) {
+              if (guess == numguess) {
+                let sel =
+                  "SELECT * FROM users WHERE discord_id = " + message.author.id;
+                connection.query(sel, function (error, result) {
+                  if (error) {
+                    message.reply("오류 발생 :" + error);
+                  } else {
+                    if (result.length != 0) {
+                      let give = `UPDATE users SET credits = credits + 0.2 WHERE discord_id = ${message.author.id}`;
+                      connection.query(give, function (error2, result2) {
+                        if (error2) {
+                          message.reply("오류 발생 :" + error2);
+                        } else {
+                          message.reply(
+                            correct[Math.floor(Math.random() * correct.length)]
+                          );
+                          client.channels
+                            .fetch("1097331403152162978")
+                            .then((channel) =>
+                              channel.send(
+                                "정답 : " +
+                                  numguess +
+                                  " 정답자 : <@" +
+                                  message.author.id +
+                                  ">"
+                              )
+                            )
+                            .then(() => (numguess = 0));
+                        }
+                      });
+                    } else {
+                      message.reply("정답이지만 가입안해서 무효임 ㅅㄱ");
+                    }
+                  }
+                });
+              } else if (guess >= numguess) {
+                message.react("⬇️");
               } else {
-                message.reply(pickone(whatyousaid));
+                message.react("⬆️");
+              }
+            } else {
+              message.react("❌");
+            }
+            return;
+          }
+
+          if (command.startsWith("계산")) {
+            let input = command.replace("계산 ", "");
+            if (command.includes("@")) {
+              message.reply(pickone(noeveryone));
+              return;
+            } else {
+              if (input == "0/0") {
+                message.reply(
+                  "모든 무상한 것은 단지 비유에 지나지 않는다.\n 지난날 미치지 못한 것은 여기에서 일어났어라.\n 엄청난 일이 여기서 이루어졌노라.\n 영원히 여성적인 것이 우리를 이끌어 가누라."
+                );
+                return;
+              }
+              if (isExpressionValid(input)) {
+                try {
+                  const result = calculateExpression(input);
+                  if (result !== null) {
+                    message.reply(`결과: ${result}`);
+                  } else {
+                    message.reply("유효한 사칙연산이 아님 ㅅㄱ.");
+                  }
+                } catch (error) {
+                  message.reply("오류 발생 : ```" + error + "```");
+                }
+              } else {
+                message.reply(
+                  "유효한 계산식이 아니야. \n참고로 곱하기는 *를, 나누기는 /를 써라."
+                );
               }
             }
-          });
-        }
+            return;
+          }
 
-        return;
-      }
+          if (command.startsWith("소인수분해")) {
+            let input = command.replace("소인수분해 ", "");
+            if (command.includes("@")) {
+              message.reply(pickone(noeveryone));
+              return;
+            } else {
+              let num = parseInt(input);
+              if (!isNaN(num)) {
+                if (num <= 100000000000000) {
+                  message.reply(primeFactors(num));
+                } else {
+                  message.reply(
+                    "그렇게 큰 숫자를 소인수분해 했다간 에틈봇이 터짐ㅉ"
+                  );
+                }
+              } else {
+                message.reply("ㅉ");
+              }
+            }
+            return;
+          }
 
-      if (message.content == "!숫자맞추기") {
-        if (
-          message.author.id == 183299738823688192 ||
-          message.author.id == 397208243476365323
-        ) {
-          numguess = getRandomInt(1, 1500);
-          message.reply(
-            numberguess[Math.floor(Math.random() * numberguess.length)]
-          );
-          console.log(numguess);
-        } else {
-          message.reply(pickone(fuckoff));
-        }
-        return;
-      }
+          if (command == "주사위") {
+            if (command.includes("@")) {
+              message.reply(pickone(noeveryone));
+            } else {
+              const dice = getRandomInt(1, 8);
+              if (dice != 7) {
+                message.reply(dice + "!");
+              } else {
+                message.reply(dice + "!");
+                setTimeout(function () {
+                  message.reply("어 뭐지");
+                }, 1500);
+              }
+            }
+            return;
+          }
 
-      if (numguess != 0 && message.channelId == 1102530668132569089) {
-        const guess = parseInt(message.content);
-        if (!isNaN(guess)) {
-          if (guess == numguess) {
+          if (command.startsWith("배워")) {
+            if (command.includes("DROP TABLE")) {
+              message.reply(pickone(noSQL));
+              return;
+            }
+            let msg = removeLineBreaks(command.replace("배워 ", ""));
+            let a = msg.split("/");
+            if (a.length != 2) {
+              message.reply("양식 : !배워 (질문)/(답변)");
+            } else {
+              let sel = "SELECT * FROM users WHERE discord_id = ?";
+              let uid = a[1].replace("<@", "").replace(">", "");
+
+              connection.query(
+                sel,
+                [message.author.id],
+                function (error, result) {
+                  if (error) {
+                    message.reply(pickone(errorhere) + error);
+                  } else {
+                    if (result.length != 0) {
+                      let sel2 = "SELECT * FROM atmchat WHERE discord_id = ?";
+                      connection.query(
+                        sel2,
+                        [message.author.id],
+                        function (error, result) {
+                          if (error) {
+                            message.reply("오류 발생 :" + error);
+                          } else {
+                            if (a[1].includes("@")) {
+                              message.reply(pickone(noeveryone));
+                            } else if (result.length <= 30) {
+                              let ins = "INSERT INTO atmchat() VALUES ?";
+                              let values = [
+                                [
+                                  message.author.id,
+                                  message.author.username,
+                                  a[0],
+                                  a[1],
+                                ],
+                              ];
+                              connection.query(
+                                ins,
+                                [values],
+                                function (error3, result) {
+                                  if (error3) {
+                                    message.reply("오류 발생 :" + error3);
+                                  } else {
+                                    message.reply(pickone(chataccept));
+                                  }
+                                }
+                              );
+                            } else {
+                              message.reply("최대 개수 초과");
+                            }
+                          }
+                        }
+                      );
+                    } else {
+                      message.reply("인증 (로블닉)을 통해 인증부터 해");
+                    }
+                  }
+                }
+              );
+            }
+            return;
+          }
+
+          if (command === "치워") {
+            let ins = "DELETE FROM atmchat WHERE discord_id = ?";
+            connection.query(
+              ins,
+              [message.author.id],
+              function (error3, result) {
+                if (error3) {
+                  message.reply("오류 발생 :" + error3);
+                } else {
+                  message.reply("ㅇㅇ 치웠음 ");
+                }
+              }
+            );
+            return;
+          }
+
+          if (command === "도움") {
+            message.reply(
+              "**로블록스 관련**```!인증 (로블닉) : 인증을 함\n!크레딧 : 크레딧을 확인함\n!가격보기 (상품) : 그 상품의 크레딧 가격과 구매코드를 확인\n!구매 (구매코드) : 그 상품을 구매함\n!보유상품 : 자신이 가지고 잇는 크레딧 상품 확인\n!통합정보 (맨션): 점검중\n!배팅 (크레딧) : 응애\n!유저검색 (유저이름) : 해당 유저의 정보 확인 ```**챗봇 관련**```에틈아 (할말) : 챗봇 기능 \n!배워 (질문)/(답변) : 가르침\n!치워 : 자기가 가르친 모든 것을 없앰```**그외**```!애교 : 애교를 함  \n!계산 (계산식) : 사칙연산,제곱(^),괄호 계산기능```"
+            );
+            return;
+          }
+
+          if (command === "핑") {
+            message.reply(
+              `핑 : ${
+                Date.now() - message.createdTimestamp
+              }ms, API: ${Math.round(client.ws.ping)}ms`
+            );
+            return;
+          }
+
+          if (command.startsWith("강제치워")) {
+            if (
+              message.author.id == 183299738823688192 ||
+              message.author.id == 397208243476365323
+            ) {
+              let msg = command.replace("강제치워 ", "");
+              let uid = msg.replace("<@", "").replace(">", "");
+
+              let ins = "DELETE FROM atmchat WHERE discord_id = ?";
+              connection.query(ins, [uid], function (error3, result) {
+                if (error3) {
+                  message.reply("오류 발생 :" + error3);
+                } else {
+                  message.reply("ㅇㅇ 치웠음");
+                }
+              });
+            } else {
+              message.reply(pickone(fuckoff));
+            }
+            return;
+          }
+
+          if (command.startsWith("유저검색")) {
+            if (command.includes("DROP TABLE")) {
+              message.reply(pickone(noSQL));
+              return;
+            }
+            let msg = command.replace("유저검색 ", "");
+            try {
+              const userId = await getUserIdFromUsername(msg);
+              let credits = "";
+              if (userId) {
+                let sel = "SELECT * FROM users WHERE roblox_id = " + userId;
+                connection.query(sel, async function (error, result) {
+                  if (error) {
+                    message.reply("오류 발생 :" + error);
+                  } else {
+                    if (result.length != 0) {
+                      credits = String(result[0].credits.toFixed(1));
+                    } else {
+                      credits = "에틈봇 미가입";
+                    }
+                  }
+                });
+                const info = await noblox.getPlayerInfo(userId);
+                const thumbnailUrl = await noblox.getPlayerThumbnail(
+                  userId,
+                  420,
+                  "png",
+                  true,
+                  "Headshot"
+                );
+
+                const Embed = new EmbedBuilder()
+                  .setColor(0x0099ff)
+                  .setTitle(info.displayName + " (@" + info.username + ")")
+                  .setURL(`https://www.roblox.com/users/${userId}/profile`)
+                  .setThumbnail(thumbnailUrl[0].imageUrl)
+                  .addFields(
+                    { name: "크레딧", value: credits, inline: true },
+                    { name: "유저 ID", value: String(userId), inline: true },
+                    {
+                      name: "계정나이 ",
+                      value: String(info.age),
+                      inline: true,
+                    },
+                    {
+                      name: "밴 여부",
+                      value: String(info.isBanned),
+                      inline: true,
+                    }
+                  )
+                  .setTimestamp();
+
+                message.reply({ embeds: [Embed] });
+              } else {
+                message.reply(
+                  notfound[Math.floor(Math.random() * notfound.length)]
+                );
+              }
+            } catch (error) {
+              message.reply("오류 발생 : ```" + error + "```");
+            }
+            return;
+          }
+
+          if (command.startsWith("지급")) {
+            if (
+              message.author.id == 183299738823688192 ||
+              message.author.id == 678533110115336222
+            ) {
+              let a = command.split(" ");
+              let sel = "SELECT * FROM users WHERE discord_id = ?";
+              let uid = a[1].replace("<@", "").replace(">", "");
+
+              connection.query(
+                sel,
+                [message.author.id],
+                function (error, result) {
+                  if (error) {
+                    message.reply("오류 발생 :" + error);
+                  } else {
+                    if (result.length != 0) {
+                      let give = `UPDATE users SET credits = credits + ${a[2]} WHERE discord_id = ${uid}`;
+                      connection.query(give, function (error2, result2) {
+                        if (error2) {
+                          message.reply("오류 발생 :" + error2);
+                        } else {
+                          message.reply("크레딧 지급 완료");
+                        }
+                      });
+                    } else {
+                      message.reply("그 사람은 가입이 되어 있지 않습니다.");
+                    }
+                  }
+                }
+              );
+            } else {
+              message.reply(pickone(fuckoff));
+            }
+            return;
+          }
+
+          if (command.startsWith("상태설정")) {
+            if (message.author.id == 183299738823688192) {
+              let a = command.replace("상태설정 ", "");
+              client.user.setPresence({
+                activities: [{ name: a[1], type: ActivityType.Playing }],
+                status: "online",
+              });
+              message.reply("ㅇㅇ");
+            } else {
+              message.reply(pickone(fuckoff));
+            }
+            return;
+          }
+
+          if (command.startsWith("순금시세")) {
+            message.reply(gold);
+            return;
+          }
+
+          if (command.startsWith("정답설정")) {
+            if (
+              message.author.id == 183299738823688192 ||
+              message.author.id == 397208243476365323
+            ) {
+              eventanswer = command.replace("정답설정 ", "");
+              aimg = message.attachments.first().url;
+              message.reply("ㅇㅋ");
+            } else {
+              message.reply(pickone(fuckoff));
+            }
+            return;
+          }
+
+          if (command === "문제설정") {
+            if (
+              message.author.id == 183299738823688192 ||
+              message.author.id == 397208243476365323
+            ) {
+              qimg = message.attachments.first().url;
+              client.channels
+                .fetch("1097331403152162978")
+                .then((channel) =>
+                  channel.send("<@&1072055006620033044> 맞춰보셈 : " + qimg)
+                );
+              eventon = true;
+              message.reply("ㅇㅋ");
+            } else {
+              message.reply(pickone(fuckoff));
+            }
+            return;
+          }
+
+          if (command.startsWith("문제내기")) {
+            if (
+              message.author.id == 183299738823688192 ||
+              message.author.id == 397208243476365323
+            ) {
+              let aaaaa = command.replace("문제내기 ", "").split("/");
+              if (aaaaa.length == 2) {
+                try {
+                  txteventanswer = aaaaa[1];
+                  qimg = message.attachments.first().url;
+                  const exampleEmbed = new EmbedBuilder()
+                    .setColor(0x0099ff)
+                    .setAuthor({ name: "출제자 : " + message.author.username })
+                    .setTitle(aaaaa[0])
+                    .setImage(qimg)
+                    .setTimestamp()
+                    .setFooter({ text: "#답지 채널에 정답을 입력해보세요." });
+                  client.channels
+                    .fetch("1097331403152162978")
+                    .then((channel) =>
+                      channel.send("<@&1072055006620033044> ")
+                    );
+                  client.channels
+                    .fetch("1097331403152162978")
+                    .then((channel) =>
+                      channel.send({ embeds: [exampleEmbed] })
+                    );
+                  message.reply("ㅇㅋ");
+                } catch (error) {
+                  message.reply(pickone(errorhere) + "```" + error + "```");
+                }
+              } else {
+                message.reply("양식대로 하셈");
+              }
+            } else {
+              message.reply(pickone(fuckoff));
+            }
+            return;
+          }
+
+          if (command.startsWith("가격보기")) {
+            let wat = command.replace("가격보기 ", "");
+            try {
+              const res = await axios.get(json_pass);
+              let found = null;
+              for (let i = 0; i < res.data.length; i++) {
+                if (
+                  res.data[i].passname.includes(wat) ||
+                  res.data[i].display.includes(wat)
+                ) {
+                  found = res.data[i];
+                  break;
+                }
+              }
+              if (found == null) {
+                message.reply(pickone(notfound));
+              } else {
+                const bruhembed = new EmbedBuilder()
+                  .setColor(0x0099ff)
+                  .setTitle(
+                    found.buyable ? found.display : "💵" + found.display
+                  )
+                  .setDescription("구매 코드 : " + found.passname)
+                  .addFields(
+                    {
+                      name: "크레딧 가격",
+                      value: found.limited
+                        ? found.price * 4 + " 크레딧"
+                        : found.price + " 크레딧",
+                      inline: true,
+                    },
+                    {
+                      name: "현금 가격",
+                      value: found.price * 10000 + "원",
+                      inline: true,
+                    },
+                    {
+                      name: "소유자",
+                      value: found.list.length + "명",
+                      inline: true,
+                    }
+                  );
+                message.reply({ embeds: [bruhembed] });
+              }
+            } catch (err) {
+              console.log(err);
+            }
+          }
+
+          // if (command === "올겜패가격") {
+          //   let sel = "SELECT * FROM shopprice";
+          //   connection.query(sel, function (error, result) {
+          //     if (error) {
+          //       message.reply("오류 발생 :" + error);
+          //     } else {
+          //       if (result.length != 0) {
+          //         let s = 0;
+          //         for (let i = 0; i < result.length; i++) {
+          //           s += result[i].price;
+          //         }
+          //         message.reply(
+          //           `올겜패 가격 : ${Math.floor(
+          //             (s / 20) * 17
+          //           )}크레딧 (15% 할인가 적용)`
+          //         );
+          //       } else {
+          //         message.reply(
+          //           notfound[Math.floor(Math.random() * notfound.length)]
+          //         );
+          //       }
+          //     }
+          //   });
+          // }
+
+          if (command === "크레딧") {
             let sel =
               "SELECT * FROM users WHERE discord_id = " + message.author.id;
             connection.query(sel, function (error, result) {
@@ -788,630 +1494,167 @@ client.on("messageCreate", async (message) => {
                 message.reply("오류 발생 :" + error);
               } else {
                 if (result.length != 0) {
-                  let give = `UPDATE users SET credits = credits + 0.2 WHERE discord_id = ${message.author.id}`;
-                  connection.query(give, function (error2, result2) {
-                    if (error2) {
-                      message.reply("오류 발생 :" + error2);
-                    } else {
-                      message.reply(
-                        correct[Math.floor(Math.random() * correct.length)]
-                      );
-                      client.channels
-                        .fetch("1097331403152162978")
-                        .then((channel) =>
-                          channel.send(
-                            "정답 : " +
-                              numguess +
-                              " 정답자 : <@" +
-                              message.author.id +
-                              ">"
-                          )
-                        )
-                        .then(() => (numguess = 0));
-                    }
-                  });
+                  if (result.credits == 0) {
+                    message.reply(pickone(empty));
+                  } else {
+                    message.reply(
+                      `<@${
+                        message.author.id
+                      }>의 크레딧 : ${result[0].credits.toFixed(1)}`
+                    );
+                  }
                 } else {
-                  message.reply("정답이지만 가입안해서 무효임 ㅅㄱ");
+                  message.reply("인증 (로블닉)을 사용해 가입부터 해");
                 }
               }
             });
-          } else if (guess >= numguess) {
-            message.react("⬇️");
-          } else {
-            message.react("⬆️");
-          }
-        } else {
-          message.react("❌");
-        }
-        return;
-      }
-
-      if (message.content.startsWith("!계산")) {
-        let input = message.content.replace("!계산 ", "");
-        if (message.content.includes("@")) {
-          message.reply(pickone(noeveryone));
-          return;
-        } else {
-          if (input == "0/0") {
-            message.reply(
-              "모든 무상한 것은 단지 비유에 지나지 않는다.\n 지난날 미치지 못한 것은 여기에서 일어났어라.\n 엄청난 일이 여기서 이루어졌노라.\n 영원히 여성적인 것이 우리를 이끌어 가누라."
-            );
             return;
           }
-          if (isExpressionValid(input)) {
-            try {
-              const result = calculateExpression(input);
-              if (result !== null) {
-                message.reply(`결과: ${result}`);
-              } else {
-                message.reply("유효한 사칙연산이 아님 ㅅㄱ.");
-              }
-            } catch (error) {
-              message.reply("오류 발생 : ```" + error + "```");
-            }
-          } else {
-            message.reply(
-              "유효한 계산식이 아니야. \n참고로 곱하기는 *를, 나누기는 /를 써라."
-            );
-          }
-        }
-        return;
-      }
 
-      if (message.content.startsWith("!소인수분해")) {
-        let input = message.content.replace("!소인수분해 ", "");
-        if (message.content.includes("@")) {
-          message.reply(pickone(noeveryone));
-          return;
-        } else {
-          let num = parseInt(input);
-          if (!isNaN(num)) {
-            if (num <= 100000000000000) {
-              message.reply(primeFactors(num));
-            } else {
-              message.reply(
-                "그렇게 큰 숫자를 소인수분해 했다간 에틈봇이 터짐ㅉ"
-              );
-            }
-          } else {
-            message.reply("ㅉ");
-          }
-        }
-        return;
-      }
-
-      if (message.content == "<@1106239007341420615>") {
-        message.reply(hello[Math.floor(Math.random() * hello.length)]);
-      }
-
-      if (message.content == "!주사위") {
-        if (message.content.includes("@")) {
-          message.reply(pickone(noeveryone));
-        } else {
-          const dice = getRandomInt(1, 8);
-          if (dice != 7) {
-            message.reply(dice + "!");
-          } else {
-            message.reply(dice + "!");
-            setTimeout(function () {
-              message.reply("어 뭐지");
-            }, 1500);
-          }
-        }
-        return;
-      }
-
-      if (message.content.startsWith("!배워")) {
-        if (message.content.includes("DROP TABLE")) {
-          message.reply(pickone(noSQL));
-          return;
-        }
-        let msg = removeLineBreaks(message.content.replace("!배워 ", ""));
-        let a = msg.split("/");
-        if (a.length != 2) {
-          message.reply("양식 : !배워 (질문)/(답변)");
-        } else {
-          let sel = "SELECT * FROM users WHERE discord_id = ?";
-          let uid = a[1].replace("<@", "").replace(">", "");
-
-          connection.query(sel, [message.author.id], function (error, result) {
-            if (error) {
-              message.reply(pickone(errorhere) + error);
-            } else {
-              if (result.length != 0) {
-                let sel2 = "SELECT * FROM atmchat WHERE discord_id = ?";
-                connection.query(
-                  sel2,
-                  [message.author.id],
-                  function (error, result) {
-                    if (error) {
-                      message.reply("오류 발생 :" + error);
-                    } else {
-                      if (a[1].includes("@")) {
-                        message.reply(pickone(noeveryone));
-                      } else if (result.length <= 30) {
-                        let ins = "INSERT INTO atmchat() VALUES ?";
-                        let values = [
-                          [
-                            message.author.id,
-                            message.author.username,
-                            a[0],
-                            a[1],
-                          ],
-                        ];
-                        connection.query(
-                          ins,
-                          [values],
-                          function (error3, result) {
-                            if (error3) {
-                              message.reply("오류 발생 :" + error3);
-                            } else {
-                              message.reply(pickone(chataccept));
-                            }
-                          }
-                        );
-                      } else {
-                        message.reply("최대 개수 초과");
-                      }
-                    }
-                  }
-                );
-              } else {
-                message.reply("!인증 (로블닉)을 통해 인증부터 해");
-              }
-            }
-          });
-        }
-        return;
-      }
-
-      if (message.content === "!치워") {
-        let ins = "DELETE FROM atmchat WHERE discord_id = ?";
-        connection.query(ins, [message.author.id], function (error3, result) {
-          if (error3) {
-            message.reply("오류 발생 :" + error3);
-          } else {
-            message.reply("ㅇㅇ 치웠음 ");
-          }
-        });
-        return;
-      }
-
-      if (message.content === "!도움") {
-        message.reply(
-          "**로블록스 관련**```!인증 (로블닉) : 인증을 함\n!크레딧 : 크레딧을 확인함\n!가격보기 (상품) : 그 상품의 크레딧 가격과 구매코드를 확인\n!구매 (구매코드) : 그 상품을 구매함\n!보유상품 : 자신이 가지고 잇는 크레딧 상품 확인\n!통합정보 (맨션): 점검중\n!배팅 (크레딧) : 응애\n!유저검색 (유저이름) : 해당 유저의 정보 확인 ```**챗봇 관련**```에틈아 (할말) : 챗봇 기능 \n!배워 (질문)/(답변) : 가르침\n!치워 : 자기가 가르친 모든 것을 없앰```**그외**```!애교 : 애교를 함  \n!계산 (계산식) : 사칙연산,제곱(^),괄호 계산기능 \n!eval (코드) - 해보셈```"
-        );
-        return;
-      }
-
-      if (message.content === "!핑") {
-        message.reply(
-          `핑 : ${Date.now() - message.createdTimestamp}ms, API: ${Math.round(
-            client.ws.ping
-          )}ms`
-        );
-        return;
-      }
-
-      if (message.content.startsWith("!강제치워")) {
-        if (
-          message.author.id == 183299738823688192 ||
-          message.author.id == 397208243476365323
-        ) {
-          let msg = message.content.replace("!강제치워 ", "");
-          let uid = msg.replace("<@", "").replace(">", "");
-
-          let ins = "DELETE FROM atmchat WHERE discord_id = ?";
-          connection.query(ins, [uid], function (error3, result) {
-            if (error3) {
-              message.reply("오류 발생 :" + error3);
-            } else {
-              message.reply("ㅇㅇ 치웠음");
-            }
-          });
-        } else {
-          message.reply(pickone(fuckoff));
-        }
-        return;
-      }
-
-      if (message.content.startsWith("!통합정보")) {
-        //     let msg = message.content.replace("!통합정보 ", "")
-        //     let uid =  (msg.replace("<@", "")).replace(">","")
-        //     let sel = "SELECT * FROM users WHERE discord_id = ?"
-        //   connection.query(sel,[msg],async function(error,result){
-        //       if (error){
-        //         message.reply("오류 발생 :" + error);
-        //       }else{
-
-        //         if(result.length != 0){
-        //           try {
-        //           const info = await noblox.getPlayerInfo(result[0].roblox_id)
-        //           const thumbnailUrl = await noblox.getPlayerThumbnail(result[0].roblox_id, 420, "png", true, "Headshot")
-        //           const Embed = new EmbedBuilder()
-        //             .setColor(0x0099FF)
-        //             .setTitle(info.displayName+ " (@"+info.username +")")
-        //             .setURL(`https://www.roblox.com/users/${result[0].roblox_id}/profile`)
-        //             .setThumbnail(thumbnailUrl[0].imageUrl)
-        //             .addFields(
-        //               { name: '크레딧', value: String(result[0].credits.toFixed(1)),inline: true },
-        //               { name: '유저 ID', value: String(result[0].roblox_id),inline: true },
-        //               { name: '계정나이 ', value: String(info.age),inline: true },
-        //               { name: '밴 여부', value: String(info.isBanned), inline: true },
-        //               )
-        //             .setTimestamp();
-
-        //             message.reply({ embeds: [Embed] });
-        //             } catch (error) {
-        //               message.reply("오류 발생 : ```" +error + "```");
-
-        //             }
-
-        //         }else{
-        //           message.reply(pickone(notindata));
-        //         }
-        //       }
-        // })
-        message.reply("현재 점검중인 기능틈");
-        return;
-      }
-
-      if (message.content.startsWith("!유저검색")) {
-        if (message.content.includes("DROP TABLE")) {
-          message.reply(pickone(noSQL));
-          return;
-        }
-        let msg = message.content.replace("!유저검색 ", "");
-        try {
-          const userId = await getUserIdFromUsername(msg);
-          let credits = "";
-          if (userId) {
-            let sel = "SELECT * FROM users WHERE roblox_id = " + userId;
+          if (command == "보유상품") {
+            let sel =
+              "SELECT * FROM users WHERE discord_id = " + message.author.id;
             connection.query(sel, async function (error, result) {
               if (error) {
                 message.reply("오류 발생 :" + error);
               } else {
                 if (result.length != 0) {
-                  credits = String(result[0].credits.toFixed(1));
+                  let have = "";
+                  try {
+                    const res = await axios.get(json_pass);
+                    if (res.data.length > 0) {
+                      for (let i = 0; i < res.data.length; i++) {
+                        if (res.data[i].list.includes(result[0].roblox_id)) {
+                          have += res.data[i].passname + ", ";
+                        }
+                      }
+                    }
+                    if (have == "") {
+                      have = "없네 그지인듯ㅋ";
+                    }
+                    message.reply(
+                      "가지고 있는 크레딧 상품 : ``` " + have + "```"
+                    );
+                  } catch (err) {
+                    console.log(error);
+                  }
                 } else {
-                  credits = "에틈봇 미가입";
+                  message.reply(pickone(notindata));
                 }
               }
             });
-            const info = await noblox.getPlayerInfo(userId);
-            const thumbnailUrl = await noblox.getPlayerThumbnail(
-              userId,
-              420,
-              "png",
-              true,
-              "Headshot"
-            );
-
-            const Embed = new EmbedBuilder()
-              .setColor(0x0099ff)
-              .setTitle(info.displayName + " (@" + info.username + ")")
-              .setURL(`https://www.roblox.com/users/${userId}/profile`)
-              .setThumbnail(thumbnailUrl[0].imageUrl)
-              .addFields(
-                { name: "크레딧", value: credits, inline: true },
-                { name: "유저 ID", value: String(userId), inline: true },
-                { name: "계정나이 ", value: String(info.age), inline: true },
-                { name: "밴 여부", value: String(info.isBanned), inline: true }
-              )
-              .setTimestamp();
-
-            message.reply({ embeds: [Embed] });
-          } else {
-            message.reply(
-              notfound[Math.floor(Math.random() * notfound.length)]
-            );
+            return;
           }
-        } catch (error) {
-          message.reply("오류 발생 : ```" + error + "```");
-        }
-        return;
-      }
 
-      if (message.content.startsWith("!지급")) {
-        if (
-          message.author.id == 183299738823688192 ||
-          message.author.id == 678533110115336222
-        ) {
-          let a = message.content.split(" ");
-          let sel = "SELECT * FROM users WHERE discord_id = ?";
-          let uid = a[1].replace("<@", "").replace(">", "");
+          if (command == "에틈봇소스") {
+            message.reply("https://github.com/ATMnou/ATMbot");
+            return;
+          }
 
-          connection.query(sel, [message.author.id], function (error, result) {
-            if (error) {
-              message.reply("오류 발생 :" + error);
-            } else {
-              if (result.length != 0) {
-                let give = `UPDATE users SET credits = credits + ${a[2]} WHERE discord_id = ${uid}`;
-                connection.query(give, function (error2, result2) {
-                  if (error2) {
-                    message.reply("오류 발생 :" + error2);
-                  } else {
-                    message.reply("크레딧 지급 완료");
-                  }
-                });
+          if (command.startsWith("구매")) {
+            message.reply("점검중");
+            return;
+            if (command.includes("DROP TABLE")) {
+              message.reply(pickone(noSQL));
+              return;
+            }
+            let wat = command.replace("구매 ", "");
+            let sel =
+              "SELECT * FROM users WHERE discord_id = " + message.author.id;
+            connection.query(sel, async function (error, result) {
+              if (error) {
+                message.reply("오류 발생 :" + error);
               } else {
-                message.reply("그 사람은 가입이 되어 있지 않습니다.");
-              }
-            }
-          });
-        } else {
-          message.reply(pickone(fuckoff));
-        }
-        return;
-      }
-
-      if (message.content.startsWith("!상태설정")) {
-        if (message.author.id == 183299738823688192) {
-          let a = message.content.replace("!상태설정 ", "");
-          client.user.setPresence({
-            activities: [{ name: a[1], type: ActivityType.Playing }],
-            status: "online",
-          });
-          message.reply("ㅇㅇ");
-        } else {
-          message.reply(pickone(fuckoff));
-        }
-        return;
-      }
-
-      if (message.content.startsWith("!순금시세")) {
-        message.reply(gold);
-        return;
-      }
-
-      if (
-        message.content.includes("청각") ||
-        message.content.includes("아리해") ||
-        (message.content.includes("프") && message.content.includes("렌")) ||
-        (message.content.includes("렌") && message.content.includes("제"))
-      ) {
-        message.delete();
-        // message.author.timeout(600,"ㅍㄹㅈ 발언")
-        // .then(() => message.reply("ez"))
-        // .catch(console.log);
-        return;
-      }
-
-      if (message.content.startsWith("!정답설정")) {
-        if (
-          message.author.id == 183299738823688192 ||
-          message.author.id == 397208243476365323
-        ) {
-          eventanswer = message.content.replace("!정답설정 ", "");
-          aimg = message.attachments.first().url;
-          message.reply("ㅇㅋ");
-        } else {
-          message.reply(pickone(fuckoff));
-        }
-        return;
-      }
-
-      if (message.content === "!문제설정") {
-        if (
-          message.author.id == 183299738823688192 ||
-          message.author.id == 397208243476365323
-        ) {
-          qimg = message.attachments.first().url;
-          client.channels
-            .fetch("1097331403152162978")
-            .then((channel) =>
-              channel.send("<@&1072055006620033044> 맞춰보셈 : " + qimg)
-            );
-          eventon = true;
-          message.reply("ㅇㅋ");
-        } else {
-          message.reply(pickone(fuckoff));
-        }
-        return;
-      }
-
-      if (message.content.startsWith("!문제내기")) {
-        if (
-          message.author.id == 183299738823688192 ||
-          message.author.id == 397208243476365323
-        ) {
-          let aaaaa = message.content.replace("!문제내기 ", "").split("/");
-          if (aaaaa.length == 2) {
-            try {
-              txteventanswer = aaaaa[1];
-              qimg = message.attachments.first().url;
-              const exampleEmbed = new EmbedBuilder()
-                .setColor(0x0099ff)
-                .setAuthor({ name: "출제자 : " + message.author.username })
-                .setTitle(aaaaa[0])
-                .setImage(qimg)
-                .setTimestamp()
-                .setFooter({ text: "#답지 채널에 정답을 입력해보세요." });
-              client.channels
-                .fetch("1097331403152162978")
-                .then((channel) => channel.send("<@&1072055006620033044> "));
-              client.channels
-                .fetch("1097331403152162978")
-                .then((channel) => channel.send({ embeds: [exampleEmbed] }));
-              message.reply("ㅇㅋ");
-            } catch (error) {
-              message.reply(pickone(errorhere) + "```" + error + "```");
-            }
-          } else {
-            message.reply("양식대로 하셈");
-          }
-        } else {
-          message.reply(pickone(fuckoff));
-        }
-        return;
-      }
-
-      if (message.content.startsWith("!가격보기")) {
-        let wat = message.content.replace("!가격보기 ", "");
-        try {
-          const res = await axios.get(json_pass);
-          let found = null;
-          for (let i = 0; i < res.data.length; i++) {
-            if (
-              res.data[i].passname.includes(wat) ||
-              res.data[i].display.includes(wat)
-            ) {
-              found = res.data[i];
-              break;
-            }
-          }
-          if (found == null) {
-            message.reply(pickone(notfound));
-          } else {
-            const bruhembed = new EmbedBuilder()
-              .setColor(0x0099ff)
-              .setTitle(found.buyable ? found.display : "💵" + found.display)
-              .setDescription("구매 코드 : " + found.passname)
-              .addFields(
-                {
-                  name: "크레딧 가격",
-                  value: found.limited
-                    ? found.price * 4 + " 크레딧"
-                    : found.price + " 크레딧",
-                  inline: true,
-                },
-                {
-                  name: "현금 가격",
-                  value: found.price * 10000 + "원",
-                  inline: true,
-                },
-                {
-                  name: "소유자",
-                  value: found.list.length + "명",
-                  inline: true,
-                }
-              );
-            message.reply({ embeds: [bruhembed] });
-          }
-        } catch (err) {
-          console.log(err);
-        }
-      }
-
-      if (message.content === "!올겜패가격") {
-        let sel = "SELECT * FROM shopprice";
-        connection.query(sel, function (error, result) {
-          if (error) {
-            message.reply("오류 발생 :" + error);
-          } else {
-            if (result.length != 0) {
-              let s = 0;
-              for (let i = 0; i < result.length; i++) {
-                s += result[i].price;
-              }
-              message.reply(
-                `올겜패 가격 : ${Math.floor(
-                  (s / 20) * 17
-                )}크레딧 (15% 할인가 적용)`
-              );
-            } else {
-              message.reply(
-                notfound[Math.floor(Math.random() * notfound.length)]
-              );
-            }
-          }
-        });
-      }
-
-      if (message.content === "!크레딧") {
-        let sel = "SELECT * FROM users WHERE discord_id = " + message.author.id;
-        connection.query(sel, function (error, result) {
-          if (error) {
-            message.reply("오류 발생 :" + error);
-          } else {
-            if (result.length != 0) {
-              if (result.credits == 0) {
-                message.reply(pickone(empty));
-              } else {
-                message.reply(
-                  `<@${
-                    message.author.id
-                  }>의 크레딧 : ${result[0].credits.toFixed(1)}`
-                );
-              }
-            } else {
-              message.reply("!인증 (로블닉)을 사용해 가입부터 해");
-            }
-          }
-        });
-        return;
-      }
-
-      if (message.content == "!보유상품") {
-        let sel = "SELECT * FROM users WHERE discord_id = " + message.author.id;
-        connection.query(sel, async function (error, result) {
-          if (error) {
-            message.reply("오류 발생 :" + error);
-          } else {
-            if (result.length != 0) {
-              let have = "";
-              try {
-                const res = await axios.get(json_pass);
-                if (res.data.length > 0) {
-                  for (let i = 0; i < res.data.length; i++) {
-                    if (res.data[i].list.includes(result[0].roblox_id)) {
-                      have += res.data[i].passname + ", ";
-                    }
-                  }
-                }
-                if (have == "") {
-                  have = "없네 그지인듯ㅋ";
-                }
-                message.reply("가지고 있는 크레딧 상품 : ``` " + have + "```");
-              } catch (err) {
-                console.log(error);
-              }
-            } else {
-              message.reply(pickone(notindata));
-            }
-          }
-        });
-        return;
-      }
-
-      if (message.content.startsWith("!구매")) {
-        message.reply("점검중");
-        return;
-        if (message.content.includes("DROP TABLE")) {
-          message.reply(pickone(noSQL));
-          return;
-        }
-        let wat = message.content.replace("!구매 ", "");
-        let sel = "SELECT * FROM users WHERE discord_id = " + message.author.id;
-        connection.query(sel, async function (error, result) {
-          if (error) {
-            message.reply("오류 발생 :" + error);
-          } else {
-            if (result.length != 0) {
-              try {
-                const res = await axios.get(json_pass);
-                let findidx = -1;
-                let findid = 0;
-                for (let i = 0; i < res.data.length; i++) {
-                  if (res.data[i].passname == wat) {
-                    findidx = i;
-                    findid = res.data[i].id;
-                  }
-                }
-                if (findidx != -1) {
-                  if (res.data[findidx].buyable == false) {
-                    message.reply("응 현금으로만 살수있어 ㅉ");
-                  } else {
-                    if (!res.data[findidx].list.includes(result[0].roblox_id)) {
-                      if (result[0].credits < res.data[findidx].price) {
-                        message.reply(pickone(nomoney));
-                        return;
+                if (result.length != 0) {
+                  try {
+                    const res = await axios.get(json_pass);
+                    let findidx = -1;
+                    let findid = 0;
+                    for (let i = 0; i < res.data.length; i++) {
+                      if (res.data[i].passname == wat) {
+                        findidx = i;
+                        findid = res.data[i].id;
                       }
-                      let give = `UPDATE users SET credits = credits - ${res.data[findidx].price} WHERE discord_id = ${message.author.id}`;
-                      connection.query(give, async function (error3, result3) {
-                        if (error3) {
-                          message.reply("오류 발생 :" + error3);
+                    }
+                    if (findidx != -1) {
+                      if (res.data[findidx].buyable == false) {
+                        message.reply("응 현금으로만 살수있어 ㅉ");
+                      } else {
+                        if (
+                          !res.data[findidx].list.includes(result[0].roblox_id)
+                        ) {
+                          if (result[0].credits < res.data[findidx].price) {
+                            message.reply(pickone(nomoney));
+                            return;
+                          }
+                          let give = `UPDATE users SET credits = credits - ${res.data[findidx].price} WHERE discord_id = ${message.author.id}`;
+                          connection.query(
+                            give,
+                            async function (error3, result3) {
+                              if (error3) {
+                                message.reply("오류 발생 :" + error3);
+                              } else {
+                                const firstPass = res.data[findidx];
+                                const newlist = firstPass.list;
+                                newlist.push(result[0].roblox_id);
+                                try {
+                                  const res2 = await axios.patch(
+                                    json_pass + "/" + findid,
+                                    {
+                                      list: newlist,
+                                    }
+                                  );
+                                  message.reply(pickone(buydone));
+                                  return;
+                                } catch (err3) {
+                                  console.log(err3);
+                                  return;
+                                }
+                              }
+                            }
+                          );
                         } else {
+                          message.reply("이미 삿음 ㅉ");
+                        }
+                      }
+                    } else {
+                      message.reply(pickone(notfound));
+                    }
+                  } catch (err) {}
+                }
+              }
+            });
+            return;
+          }
+
+          if (command.startsWith("상품지급")) {
+            if (message.author.id == 183299738823688192) {
+              let a = command.split(" ");
+              if (a.length != 3) {
+                message.reply("제대로쳐ㅉ");
+                return;
+              }
+              let uid = a[1].replace("<@", "").replace(">", "");
+              let sel = "SELECT * FROM users WHERE discord_id = " + uid;
+              connection.query(sel, async function (error, result) {
+                if (error) {
+                  message.reply("오류 발생 :" + error);
+                } else {
+                  if (result.length != 0) {
+                    try {
+                      const res = await axios.get(json_pass);
+                      let findidx = -1;
+                      let findid = 0;
+                      for (let i = 0; i < res.data.length; i++) {
+                        if (res.data[i].passname == a[2]) {
+                          findidx = i;
+                          findid = res.data[i].id;
+                        }
+                      }
+                      if (findidx != -1) {
+                        if (
+                          !res.data[findidx].list.includes(result[0].roblox_id)
+                        ) {
                           const firstPass = res.data[findidx];
                           const newlist = firstPass.list;
                           newlist.push(result[0].roblox_id);
@@ -1422,373 +1665,334 @@ client.on("messageCreate", async (message) => {
                                 list: newlist,
                               }
                             );
-                            message.reply(pickone(buydone));
+                            message.reply("상품 지급 완료");
                             return;
                           } catch (err3) {
                             console.log(err3);
                             return;
                           }
-                        }
-                      });
-                    } else {
-                      message.reply("이미 삿음 ㅉ");
-                    }
-                  }
-                } else {
-                  message.reply(pickone(notfound));
-                }
-              } catch (err) {}
-            }
-          }
-        });
-        return;
-      }
-
-      if (message.content.startsWith("!상품지급")) {
-        if (message.author.id == 183299738823688192) {
-          let a = message.content.split(" ");
-          if (a.length != 3) {
-            message.reply("제대로쳐ㅉ");
-            return;
-          }
-          let uid = a[1].replace("<@", "").replace(">", "");
-          let sel = "SELECT * FROM users WHERE discord_id = " + uid;
-          connection.query(sel, async function (error, result) {
-            if (error) {
-              message.reply("오류 발생 :" + error);
-            } else {
-              if (result.length != 0) {
-                try {
-                  const res = await axios.get(json_pass);
-                  let findidx = -1;
-                  let findid = 0;
-                  for (let i = 0; i < res.data.length; i++) {
-                    if (res.data[i].passname == a[2]) {
-                      findidx = i;
-                      findid = res.data[i].id;
-                    }
-                  }
-                  if (findidx != -1) {
-                    if (!res.data[findidx].list.includes(result[0].roblox_id)) {
-                      const firstPass = res.data[findidx];
-                      const newlist = firstPass.list;
-                      newlist.push(result[0].roblox_id);
-                      try {
-                        const res2 = await axios.patch(
-                          json_pass + "/" + findid,
-                          {
-                            list: newlist,
-                          }
-                        );
-                        message.reply("상품 지급 완료");
-                        return;
-                      } catch (err3) {
-                        console.log(err3);
-                        return;
-                      }
-                    } else {
-                      message.reply("이미 있대 ㅉ");
-                    }
-                  } else {
-                    message.reply(pickone(notfound));
-                  }
-                } catch (err) {}
-              }
-            }
-          });
-        } else {
-          message.reply(pickone(fuckoff));
-        }
-        return;
-      }
-
-      // if (message.content.startsWith("!배팅")) {
-      //   if (message.content.includes("DROP TABLE")) {
-      //     message.reply(pickone(noSQL));
-      //     return;
-      //   }
-      //   let wat = message.content.replace("!배팅 ", "");
-      //   let coin = parseInt(wat);
-      //   if (isNaN(coin)) {
-      //     message.reply("ㅉ");
-      //     return;
-      //   }
-      //   if (coin < 1) {
-      //     message.reply("최소 배팅금은 1크레딧임ㅉ");
-      //     return;
-      //   }
-      //   if (coin > 15) {
-      //     message.reply("최대 배팅금은 15크레딧임ㅉ");
-      //     return;
-      //   }
-      //   let sel = "SELECT * FROM users WHERE discord_id = " + message.author.id;
-      //   connection.query(sel, async function (error, result) {
-      //     if (error) {
-      //       message.reply("오류 발생 :" + error);
-      //     } else {
-      //       if (result.length != 0) {
-      //         if (result[0].credits >= coin) {
-      //           let dobak = calculateProbability(coin);
-      //           if (dobak[0] == true) {
-      //             let give = `UPDATE users SET credits = credits + ${coin} WHERE discord_id = ${message.author.id}`;
-      //             connection.query(give, function (error3, result3) {
-      //               if (error3) {
-      //                 message.reply("오류 발생 :" + error3);
-      //               } else {
-      //                 const exampleEmbed = new EmbedBuilder()
-      //                   .setColor([0, 255, 0])
-      //                   .setTitle("성공!")
-      //                   .setDescription(`+${coin}크레딧`);
-      //                 message.reply({ embeds: [exampleEmbed] });
-      //               }
-      //             });
-      //           } else {
-      //             let give = `UPDATE users SET credits = credits - ${coin} WHERE discord_id = ${message.author.id}`;
-      //             connection.query(give, function (error3, result3) {
-      //               if (error3) {
-      //                 message.reply("오류 발생 :" + error3);
-      //               } else {
-      //                 const exampleEmbed = new EmbedBuilder()
-      //                   .setColor([255, 0, 0])
-      //                   .setTitle("실패!")
-      //                   .setDescription(`-${coin}크레딧`);
-      //                 message.reply({ embeds: [exampleEmbed] });
-      //               }
-      //             });
-      //           }
-      //         } else {
-      //           message.reply(pickone(cantbet));
-      //         }
-      //       } else {
-      //         message.reply(pickone(notindata));
-      //       }
-      //     }
-      //   });
-      //   return;
-      // }
-
-      // 이벤트 정답
-      if (message.channelId == 1102530668132569089 && eventon == true) {
-        if (message.content == eventanswer) {
-          let sel =
-            "SELECT * FROM users WHERE discord_id = " + message.author.id;
-          connection.query(sel, function (error, result) {
-            if (error) {
-              message.reply("오류 발생 :" + error);
-            } else {
-              if (result.length != 0) {
-                let give = `UPDATE users SET credits = credits + 0.2 WHERE discord_id = ${message.author.id}`;
-                connection.query(give, function (error2, result2) {
-                  if (error2) {
-                    message.reply("오류 발생 :" + error2);
-                  } else {
-                    message.reply(
-                      correct[Math.floor(Math.random() * correct.length)]
-                    );
-                    client.channels
-                      .fetch("1097331403152162978")
-                      .then((channel) =>
-                        channel.send(
-                          "정답 : " +
-                            eventanswer +
-                            " 정답자 : <@" +
-                            message.author.id +
-                            ">, 원본 : " +
-                            aimg
-                        )
-                      )
-                      .then(() => (eventon = false));
-                  }
-                });
-              } else {
-                message.reply("정답이지만 가입안해서 무효임 ㅅㄱ");
-              }
-            }
-          });
-        } else {
-          message.react("❌");
-        }
-        return;
-      }
-      // 정답 처리 2
-      if (message.channelId == 1102530668132569089 && txteventanswer != "") {
-        if (message.content == txteventanswer) {
-          let sel =
-            "SELECT * FROM users WHERE discord_id = " + message.author.id;
-          connection.query(sel, function (error, result) {
-            if (error) {
-              message.reply("오류 발생 :" + error);
-            } else {
-              if (result.length != 0) {
-                let give = `UPDATE users SET credits = credits + 0.2 WHERE discord_id = ${message.author.id}`;
-                connection.query(give, function (error2, result2) {
-                  if (error2) {
-                    message.reply("오류 발생 :" + error2);
-                  } else {
-                    message.reply(
-                      correct[Math.floor(Math.random() * correct.length)]
-                    );
-                    client.channels
-                      .fetch("1097331403152162978")
-                      .then((channel) =>
-                        channel.send(
-                          "정답 : " +
-                            txteventanswer +
-                            " 정답자 : <@" +
-                            message.author.id +
-                            ">"
-                        )
-                      )
-                      .then(() => (txteventanswer = ""));
-                  }
-                });
-              } else {
-                message.reply("정답이지만 가입안해서 무효임 ㅅㄱ");
-              }
-            }
-          });
-        } else {
-          message.react("❌");
-        }
-        return;
-      }
-
-      if (message.content.startsWith("!인증")) {
-        if (message.content.includes("DROP TABLE")) {
-          message.reply(pickone(noSQL));
-          return;
-        }
-        (async () => {
-          const username = message.content.replace("!인증 ", "");
-          if (username.includes("@")) {
-            message.reply(pickone(noeveryone));
-            return;
-          }
-          const userId = await getUserIdFromUsername(username);
-
-          if (userId) {
-            let checkn = "SELECT * FROM users WHERE roblox_id = " + userId;
-
-            connection.query(checkn, async function (error, result3) {
-              if (error) {
-                message.reply("오류 발생 :" + error);
-              } else {
-                if (
-                  result3.length != 0 &&
-                  result3[0].discord_id != message.author.id
-                ) {
-                  message.reply(
-                    "하나의 로블록스 계정에는 하나의 디스코드 계정만 인증할 수 있어. \n만약 너가 아니거나 계정을 이전해야된다면 관리자를 불러줘.\n인증자 : " +
-                      result3[0].discord_id
-                  );
-                  return;
-                } else {
-                  let aa = splitNumber(userId);
-                  let pasc = IdtoCode(aa);
-                  const descinfo = await noblox.getPlayerInfo(userId);
-                  if (descinfo.blurb.includes(pasc)) {
-                    let sel =
-                      "SELECT * FROM users WHERE discord_id = " +
-                      message.author.id;
-                    connection.query(sel, function (error, result) {
-                      if (error) {
-                        message.reply("오류 발생 :" + error);
-                      } else {
-                        if (result.length != 0) {
-                          let ins = `UPDATE users SET roblox_id = ? WHERE discord_id = ${message.author.id}`;
-                          connection.query(
-                            ins,
-                            [userId],
-                            function (error2, result) {
-                              if (error2) {
-                                message.reply("오류 발생 :" + error2);
-                              } else {
-                                if (message.guildId == 1035183996566507580) {
-                                  let role =
-                                    message.member.guild.roles.cache.find(
-                                      (role) => role.id == "1040559158975541288"
-                                    );
-                                  if (role)
-                                    message.guild.members.cache
-                                      .get(message.author.id)
-                                      .roles.add(role, "인증 완료 : " + userId);
-                                  message.reply(
-                                    "자, " + username + ".\n수정이 완료되었어."
-                                  );
-                                } else {
-                                  message.reply(
-                                    "자, " +
-                                      username +
-                                      ".\n수정이 완료되었지만 여기는 동굴이 아니어서 역할은 못줘."
-                                  );
-                                }
-                              }
-                            }
-                          );
                         } else {
-                          let ins = "INSERT INTO users() VALUES ?";
-                          let values = [[message.author.id, userId, 0]];
-                          connection.query(
-                            ins,
-                            [values],
-                            function (error3, result) {
-                              if (error3) {
-                                message.reply("오류 발생 :" + error3);
-                              } else {
-                                if (message.guildId == 1035183996566507580) {
-                                  let role =
-                                    message.member.guild.roles.cache.find(
-                                      (role) => role.id == "1040559158975541288"
-                                    );
-                                  if (role)
-                                    message.guild.members.cache
-                                      .get(message.author.id)
-                                      .roles.add(role, "인증 완료 : " + userId);
-                                  message.reply(
-                                    "자, " + username + ".\n인증이 완료되었어."
-                                  );
-                                } else {
-                                  message.reply(
-                                    "자, " +
-                                      username +
-                                      ".\n인증이 완료되었지만 여기는 동굴이 아니어서 역할은 못줘."
-                                  );
-                                }
-                              }
-                            }
-                          );
+                          message.reply("이미 있대 ㅉ");
                         }
+                      } else {
+                        message.reply(pickone(notfound));
+                      }
+                    } catch (err) {}
+                  }
+                }
+              });
+            } else {
+              message.reply(pickone(fuckoff));
+            }
+            return;
+          }
+
+          // if (command.startsWith("배팅")) {
+          //   if (command.includes("DROP TABLE")) {
+          //     message.reply(pickone(noSQL));
+          //     return;
+          //   }
+          //   let wat = command.replace("배팅 ", "");
+          //   let coin = parseInt(wat);
+          //   if (isNaN(coin)) {
+          //     message.reply("ㅉ");
+          //     return;
+          //   }
+          //   if (coin < 1) {
+          //     message.reply("최소 배팅금은 1크레딧임ㅉ");
+          //     return;
+          //   }
+          //   if (coin > 15) {
+          //     message.reply("최대 배팅금은 15크레딧임ㅉ");
+          //     return;
+          //   }
+          //   let sel = "SELECT * FROM users WHERE discord_id = " + message.author.id;
+          //   connection.query(sel, async function (error, result) {
+          //     if (error) {
+          //       message.reply("오류 발생 :" + error);
+          //     } else {
+          //       if (result.length != 0) {
+          //         if (result[0].credits >= coin) {
+          //           let dobak = calculateProbability(coin);
+          //           if (dobak[0] == true) {
+          //             let give = `UPDATE users SET credits = credits + ${coin} WHERE discord_id = ${message.author.id}`;
+          //             connection.query(give, function (error3, result3) {
+          //               if (error3) {
+          //                 message.reply("오류 발생 :" + error3);
+          //               } else {
+          //                 const exampleEmbed = new EmbedBuilder()
+          //                   .setColor([0, 255, 0])
+          //                   .setTitle("성공!")
+          //                   .setDescription(`+${coin}크레딧`);
+          //                 message.reply({ embeds: [exampleEmbed] });
+          //               }
+          //             });
+          //           } else {
+          //             let give = `UPDATE users SET credits = credits - ${coin} WHERE discord_id = ${message.author.id}`;
+          //             connection.query(give, function (error3, result3) {
+          //               if (error3) {
+          //                 message.reply("오류 발생 :" + error3);
+          //               } else {
+          //                 const exampleEmbed = new EmbedBuilder()
+          //                   .setColor([255, 0, 0])
+          //                   .setTitle("실패!")
+          //                   .setDescription(`-${coin}크레딧`);
+          //                 message.reply({ embeds: [exampleEmbed] });
+          //               }
+          //             });
+          //           }
+          //         } else {
+          //           message.reply(pickone(cantbet));
+          //         }
+          //       } else {
+          //         message.reply(pickone(notindata));
+          //       }
+          //     }
+          //   });
+          //   return;
+          // }
+
+          // 이벤트 정답
+          if (message.channelId == 1102530668132569089 && eventon == true) {
+            if (command == eventanswer) {
+              let sel =
+                "SELECT * FROM users WHERE discord_id = " + message.author.id;
+              connection.query(sel, function (error, result) {
+                if (error) {
+                  message.reply("오류 발생 :" + error);
+                } else {
+                  if (result.length != 0) {
+                    let give = `UPDATE users SET credits = credits + 0.2 WHERE discord_id = ${message.author.id}`;
+                    connection.query(give, function (error2, result2) {
+                      if (error2) {
+                        message.reply("오류 발생 :" + error2);
+                      } else {
+                        message.reply(
+                          correct[Math.floor(Math.random() * correct.length)]
+                        );
+                        client.channels
+                          .fetch("1097331403152162978")
+                          .then((channel) =>
+                            channel.send(
+                              "정답 : " +
+                                eventanswer +
+                                " 정답자 : <@" +
+                                message.author.id +
+                                ">, 원본 : " +
+                                aimg
+                            )
+                          )
+                          .then(() => (eventon = false));
                       }
                     });
                   } else {
-                    message.reply(
-                      "아, 넌 또 뭐야, " +
-                        username +
-                        "? 너 같은 바보를 인증해야 한다니, 이건 정말로 내 인내의 한계를 시험하네. \n이 무시무시한 코드를 네 로블록스 프로필 소개란에 적어. \n코드는 바뀌지 않아, 니가 어떻게든 망쳐놓을 걸 생각하면 다행이다. ```" +
-                        pasc +
-                        "``` 그 다음엔 다시 이 멍청한 명령어를 써. 만약 네가 이걸 입력했는데 검열되면, 바로 관리자를 불러. \n아니면, 내가 무엇을 해야 할지 모르는 건가?"
-                    );
+                    message.reply("정답이지만 가입안해서 무효임 ㅅㄱ");
                   }
                 }
-              }
-            });
-          } else {
-            message.reply(
-              notfound[Math.floor(Math.random() * notfound.length)]
-            );
+              });
+            } else {
+              message.react("❌");
+            }
+            return;
           }
-        })();
-      }
+          // 정답 처리 2
+          if (
+            message.channelId == 1102530668132569089 &&
+            txteventanswer != ""
+          ) {
+            if (command == txteventanswer) {
+              let sel =
+                "SELECT * FROM users WHERE discord_id = " + message.author.id;
+              connection.query(sel, function (error, result) {
+                if (error) {
+                  message.reply("오류 발생 :" + error);
+                } else {
+                  if (result.length != 0) {
+                    let give = `UPDATE users SET credits = credits + 0.2 WHERE discord_id = ${message.author.id}`;
+                    connection.query(give, function (error2, result2) {
+                      if (error2) {
+                        message.reply("오류 발생 :" + error2);
+                      } else {
+                        message.reply(
+                          correct[Math.floor(Math.random() * correct.length)]
+                        );
+                        client.channels
+                          .fetch("1097331403152162978")
+                          .then((channel) =>
+                            channel.send(
+                              "정답 : " +
+                                txteventanswer +
+                                " 정답자 : <@" +
+                                message.author.id +
+                                ">"
+                            )
+                          )
+                          .then(() => (txteventanswer = ""));
+                      }
+                    });
+                  } else {
+                    message.reply("정답이지만 가입안해서 무효임 ㅅㄱ");
+                  }
+                }
+              });
+            } else {
+              message.react("❌");
+            }
+            return;
+          }
 
-      if (
-        message.channelId == "1127488262085296248" &&
-        !message.author.bot &&
-        !message.content.includes("에틈아") &&
-        !message.content.startsWith("!") &&
-        !message.content.includes("@")
-      ) {
-        chatdata.push(message.content);
+          if (command.startsWith("인증")) {
+            if (command.includes("DROP TABLE")) {
+              message.reply(pickone(noSQL));
+              return;
+            }
+            (async () => {
+              const username = command.replace("인증 ", "");
+              if (username.includes("@")) {
+                message.reply(pickone(noeveryone));
+                return;
+              }
+              const userId = await getUserIdFromUsername(username);
+
+              if (userId) {
+                let checkn = "SELECT * FROM users WHERE roblox_id = " + userId;
+
+                connection.query(checkn, async function (error, result3) {
+                  if (error) {
+                    message.reply("오류 발생 :" + error);
+                  } else {
+                    if (
+                      result3.length != 0 &&
+                      result3[0].discord_id != message.author.id
+                    ) {
+                      message.reply(
+                        "하나의 로블록스 계정에는 하나의 디스코드 계정만 인증할 수 있어. \n만약 너가 아니거나 계정을 이전해야된다면 관리자를 불러줘.\n인증자 : " +
+                          result3[0].discord_id
+                      );
+                      return;
+                    } else {
+                      let aa = splitNumber(userId);
+                      let pasc = IdtoCode(aa);
+                      const descinfo = await noblox.getPlayerInfo(userId);
+                      if (descinfo.blurb.includes(pasc)) {
+                        let sel =
+                          "SELECT * FROM users WHERE discord_id = " +
+                          message.author.id;
+                        connection.query(sel, function (error, result) {
+                          if (error) {
+                            message.reply("오류 발생 :" + error);
+                          } else {
+                            if (result.length != 0) {
+                              let ins = `UPDATE users SET roblox_id = ? WHERE discord_id = ${message.author.id}`;
+                              connection.query(
+                                ins,
+                                [userId],
+                                function (error2, result) {
+                                  if (error2) {
+                                    message.reply("오류 발생 :" + error2);
+                                  } else {
+                                    if (
+                                      message.guildId == 1035183996566507580
+                                    ) {
+                                      let role =
+                                        message.member.guild.roles.cache.find(
+                                          (role) =>
+                                            role.id == "1040559158975541288"
+                                        );
+                                      if (role)
+                                        message.guild.members.cache
+                                          .get(message.author.id)
+                                          .roles.add(
+                                            role,
+                                            "인증 완료 : " + userId
+                                          );
+                                      message.reply(
+                                        "자, " +
+                                          username +
+                                          ".\n수정이 완료되었어."
+                                      );
+                                    } else {
+                                      message.reply(
+                                        "자, " +
+                                          username +
+                                          ".\n수정이 완료되었지만 여기는 동굴이 아니어서 역할은 못줘."
+                                      );
+                                    }
+                                  }
+                                }
+                              );
+                            } else {
+                              let ins = "INSERT INTO users() VALUES ?";
+                              let values = [[message.author.id, userId, 0]];
+                              connection.query(
+                                ins,
+                                [values],
+                                function (error3, result) {
+                                  if (error3) {
+                                    message.reply("오류 발생 :" + error3);
+                                  } else {
+                                    if (
+                                      message.guildId == 1035183996566507580
+                                    ) {
+                                      let role =
+                                        message.member.guild.roles.cache.find(
+                                          (role) =>
+                                            role.id == "1040559158975541288"
+                                        );
+                                      if (role)
+                                        message.guild.members.cache
+                                          .get(message.author.id)
+                                          .roles.add(
+                                            role,
+                                            "인증 완료 : " + userId
+                                          );
+                                      message.reply(
+                                        "자, " +
+                                          username +
+                                          ".\n인증이 완료되었어."
+                                      );
+                                    } else {
+                                      message.reply(
+                                        "자, " +
+                                          username +
+                                          ".\n인증이 완료되었지만 여기는 동굴이 아니어서 역할은 못줘."
+                                      );
+                                    }
+                                  }
+                                }
+                              );
+                            }
+                          }
+                        });
+                      } else {
+                        message.reply(
+                          "아, 넌 또 뭐야, " +
+                            username +
+                            "? 너 같은 바보를 인증해야 한다니, 이건 정말로 내 인내의 한계를 시험하네. \n이 무시무시한 코드를 네 로블록스 프로필 소개란에 적어. \n코드는 바뀌지 않아, 니가 어떻게든 망쳐놓을 걸 생각하면 다행이다. ```" +
+                            pasc +
+                            "``` 그 다음엔 다시 이 멍청한 명령어를 써. 만약 네가 이걸 입력했는데 검열되면, 바로 관리자를 불러. \n아니면, 내가 무엇을 해야 할지 모르는 건가?"
+                        );
+                      }
+                    }
+                  }
+                });
+              } else {
+                message.reply(
+                  notfound[Math.floor(Math.random() * notfound.length)]
+                );
+              }
+            })();
+          }
+        }
       }
+    }
+    if (
+      !message.author.bot &&
+      !message.content.includes("에틈아") &&
+      !message.content.startsWith("!") &&
+      !message.content.includes("@")
+    ) {
+      chatdata.push(message.content);
     }
   } catch (error) {
     console.log(error);

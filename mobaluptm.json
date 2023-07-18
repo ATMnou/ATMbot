@@ -18,5 +18,58 @@
       "display": "스벨트",
       "list": []
     }
+  ],
+  "servers": [
+    {
+      "id": 1,
+      "server_id": "0",
+      "server_name": "",
+      "server_prefix": "!",
+      "server_language": "ko",
+      "bot_channel_config": 0,
+      "bot_channel_list": [],
+      "message_reaction": [],
+      "use_default_reaction": true,
+      "server_admin": []
+    },
+    {
+      "server_id": "1004375586069823490",
+      "server_name": "【 산맥부대 커뮤니티 】",
+      "server_prefix": "!",
+      "server_laugnage": "ko",
+      "bot_channel_config": "1",
+      "bot_channel_list": [
+        "1128713696705785966",
+        ""
+      ],
+      "message_reaction": [],
+      "use_default_reaction": false,
+      "server_admin": [],
+      "id": 2
+    },
+    {
+      "server_id": "719132697079054357",
+      "server_name": "에틈 스튜디오",
+      "server_prefix": "!",
+      "server_laugnage": "ko",
+      "bot_channel_config": 0,
+      "bot_channel_list": [],
+      "message_reaction": [],
+      "use_default_reaction": true,
+      "server_admin": [],
+      "id": 3
+    },
+    {
+      "server_id": "983460775861567548",
+      "server_name": "Whorblox: The New Generation (18+)",
+      "server_prefix": "!",
+      "server_laugnage": "ko",
+      "bot_channel_config": 0,
+      "bot_channel_list": [],
+      "message_reaction": [],
+      "use_default_reaction": true,
+      "server_admin": [],
+      "id": 4
+    }
   ]
 }

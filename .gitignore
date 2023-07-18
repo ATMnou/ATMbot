@@ -1,3 +1,10 @@
 config.json
 chatdata/*
-node_modules/
+gpt4all/*   
+# yarn v2
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+.*.txt

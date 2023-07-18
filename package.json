@@ -1,4 +1,8 @@
 {
+  "scripts": {
+    "start": "node index.js",
+    "json": " json-server --host 210.117.212.41 mobaluptm.json"
+  },
   "dependencies": {
     "axios": "^1.4.0",
     "calculate-string": "^2.0.2",
